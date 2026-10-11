@@ -21,6 +21,7 @@ ENV_ID = "ALE/Breakout-v5"
 NUM_ENTRADAS = 128
 NUM_OCULTOS = 16
 NUM_ACOES = 3
+NUM_PAIS = 10
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
 RESULTADOS = Path("resultados")
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
@@ -67,12 +68,10 @@ def executar_episodio(ambiente, agente=None, seed=42, diagnosticar=False):
             if acao_anterior is not None and acao != acao_anterior:
                 trocas_acao += 1
             acao_anterior = acao
-        estado, recompensa, terminated, truncated, info = ambiente.step(acao)
+        estado, recompensa, terminated, truncated, info = ambiente.step(ACOES[acao])
         vida_atual = info.get("lives", 0)
         freame_atual = info.get("frame_number", 0)
-        if vida_total == vida_atual:
-          print(info)
-        else:
+        if vida_total != vida_atual:
           vida_total = vida_atual
           duracao_vida = freame_atual - frame_inicio
           frame_inicio = freame_atual
@@ -106,8 +105,7 @@ def criar_populacao(tamanho):
 
 def selecionar(populacao):
     """Seleciona a metade dos agentes com maior fitness."""
-    ordenados = sorted(populacao, key=lambda agente: agente.fitness, reverse=True)
-    return ordenados[: max(1, len(ordenados) // 2)]
+    return sorted(populacao, key=lambda x: x.fitness, reverse=True)[:NUM_PAIS]
 
 
 def mutar(agente, taxa, intensidade):
@@ -178,7 +176,7 @@ def treinar(tamanho, geracoes, elite, taxa, intensidade, pasta, seed, acompanhar
             repetitivos = sum(d["acao_dominante_pct"] >= 95 for d in diagnosticos_geracao)
             medias_acoes = {
                 acao: float(np.mean([d[acao] for d in diagnosticos_geracao]))
-                for acao in ("noop_pct", "left_pct", "right_pct")
+                for acao in ("noop_pct", "right_pct", "left_pct")
             }
             valores = [agente.fitness for agente in populacao]
             campeao = max(populacao, key=lambda agente: agente.fitness)

@@ -35,7 +35,6 @@ class Agente:
         self.W2 = np.random.randn(NUM_OCULTOS, NUM_ACOES)
         self.b2 = np.random.randn(NUM_ACOES)
         self.fitness = 0.0
-
     def agir(self, estado):
         estado = estado.astype(np.float32) / 255.0
         oculto = np.tanh(estado @ self.W1 + self.b1)
@@ -59,6 +58,7 @@ def executar_episodio(ambiente, agente=None, seed=42, diagnosticar=False):
     terminado = False
     vida_total = 5
     ambiente.step(1)
+    frame_inicio = 0
 
     while not terminado:
         acao = agente.agir(estado) if agente else int(aleatorio.integers(NUM_ACOES))
@@ -69,11 +69,14 @@ def executar_episodio(ambiente, agente=None, seed=42, diagnosticar=False):
             acao_anterior = acao
         estado, recompensa, terminated, truncated, info = ambiente.step(acao)
         vida_atual = info.get("lives", 0)
+        freame_atual = info.get("frame_number", 0)
         if vida_total == vida_atual:
-          recompensa_total += 0.01
+          print(info)
         else:
           vida_total = vida_atual
-          recompensa_total += -1
+          duracao_vida = freame_atual - frame_inicio
+          frame_inicio = freame_atual
+          recompensa_total += (duracao_vida/100) ** 2
           ambiente.step(1)
         recompensa_total += recompensa
         terminado = terminated or truncated

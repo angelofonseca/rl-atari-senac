@@ -24,6 +24,8 @@ NUM_GERACOES = 30
 NUM_OCULTOS = 16
 NUM_ACOES = 3
 NUM_PAIS = 10
+PAIS_PONTOS = 3
+PAIS_TEMPO = 2
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
 RESULTADOS = Path("resultados")
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
@@ -39,6 +41,8 @@ class Agente:
         self.W2 = np.random.randn(NUM_OCULTOS, NUM_ACOES)
         self.b2 = np.random.randn(NUM_ACOES)
         self.fitness = 0.0
+        self.tempo_vivo = 0
+        
     def agir(self, estado):
         estado = estado.astype(np.float32) / 255.0
         oculto = np.tanh(estado @ self.W1 + self.b1)
@@ -68,6 +72,7 @@ def avaliar(agente, render_mode=None):
     recompensa_total = reward
     vidas = info["lives"]
     inicio_vida = info["episode_frame_number"]
+    maior_vida = 0
 
     while not (terminated or truncated):
         action = agente.agir(state)
@@ -77,18 +82,17 @@ def avaliar(agente, render_mode=None):
         if info["lives"] < vidas:
             vidas = info["lives"]
             tempo_vivo = info["episode_frame_number"] - inicio_vida
-            recompensa_total += (tempo_vivo / 100) ** 2
+            maior_vida = max(maior_vida, tempo_vivo)
             inicio_vida = info["episode_frame_number"]
 
             if not (terminated or truncated):
                 state, reward, terminated, truncated, info = env.step(1)
                 recompensa_total += reward
     env.close()
-    return recompensa_total
-
+    return recompensa_total, maior_vida
 
 def avaliar_varias_vezes(agente, episodios):
-    return [avaliar(agente) for _ in range(episodios)]
+    return [avaliar(agente)[0] for _ in range(episodios)]
 
 
 def criar_populacao(tamanho):
@@ -96,8 +100,14 @@ def criar_populacao(tamanho):
 
 
 def selecionar(populacao):
-    """Seleciona a metade dos agentes com maior fitness."""
-    return sorted(populacao, key=lambda x: x.fitness, reverse=True)[:NUM_PAIS]
+    pais = sorted(populacao, key=lambda x: x.fitness, reverse=True)[:PAIS_PONTOS]
+    por_tempo = sorted(populacao, key=lambda x: x.tempo_vivo, reverse=True)
+    for agente in por_tempo:
+        if len(pais) == PAIS_PONTOS + PAIS_TEMPO:
+            break
+        if agente not in pais:
+            pais.append(agente)
+    return pais
 
 
 def mutar(agente, taxa, intensidade):
@@ -116,9 +126,7 @@ def nova_geracao(populacao):
     for pai in pais[:NUM_ELITE]:
         nova_geracao.append(copy.deepcopy(pai))
 
-    weights = [pai.fitness for pai in pais]
-    if sum(weights) == 0:
-        weights = None
+    weights = [len(pais) - i for i in range(len(pais))]
     while len(nova_geracao) < TAMANHO_POPULACAO:
         pai = random.choices(pais, weights=weights)[0]
         filho = copy.deepcopy(pai)
@@ -157,8 +165,9 @@ def evoluir(nome, taxa, intensidade):
     for geracao in range(NUM_GERACOES):
 
         for agente in populacao:
-            agente.fitness = avaliar(agente)
-            if melhor_agente is None or agente.fitness > melhor_agente.fitness:
+            agente.fitness, agente.tempo_vivo = avaliar(agente)
+            if melhor_agente is None or (agente.fitness, agente.tempo_vivo) > \
+                    (melhor_agente.fitness, melhor_agente.tempo_vivo):
                 melhor_agente = copy.deepcopy(agente)
 
         valores = [agente.fitness for agente in populacao]
@@ -175,18 +184,8 @@ def evoluir(nome, taxa, intensidade):
             "melhor": melhor,
             "media": media,
             "pior": pior,
+            "maior_vida": max(agente.tempo_vivo for agente in populacao),
         })
-
-        print(
-            f"Geração {geracao:03d} | "
-            f"Melhor: {melhor:.2f} | "
-            f"Média: {media:.2f} | "
-            f"Pior: {pior:.2f}"
-        )
-
-        populacao = nova_geracao(populacao)
-
-    return historico, melhor_agente
 
 
 def salvar_csv(caminho, linhas):
@@ -196,7 +195,7 @@ def salvar_csv(caminho, linhas):
         escritor.writerows(linhas)
 
 
-def salvar_grafico(caminho, historicos):
+def salvar_grafico(caminho, historicos, media_aleatorio):
     plt.figure(figsize=(9, 5))
     for nome, historico in historicos.items():
         cor = CORES.get(nome, "#2a78d6")
@@ -208,12 +207,13 @@ def salvar_grafico(caminho, historicos):
     plt.xlabel("Geração")
     plt.ylabel("Fitness")
     plt.title("Evolução do fitness - Breakout")
+    plt.axhline(media_aleatorio, color="gray", linewidth=1.5, linestyle=":",
+                label=f"aleatório - média ({media_aleatorio:.2f})")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(caminho)
     plt.close()
-
 
 def ler_argumentos():
     parser = argparse.ArgumentParser(description="Neuroevolução no Breakout")
@@ -267,8 +267,8 @@ def main():
     if args.render:
         nome = max(melhores, key=lambda n: melhores[n].fitness)
         print(f"Renderizando o melhor agente (experimento {nome})")
-        print("Fitness ao jogar de novo:", avaliar(melhores[nome], render_mode="human"))
-
+        pontos, maior_vida = avaliar(melhores[nome], render_mode="human")
+        print(f"Ao jogar de novo: {pontos:.0f} pontos | maior vida: {maior_vida} frames")
 
 if __name__ == "__main__":
     main()

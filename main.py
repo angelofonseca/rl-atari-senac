@@ -1,9 +1,8 @@
-"""Gabarito didático: neuroevolução no Atari Freeway (ALE)."""
-
 import argparse
 import copy
 import csv
-import sys
+import os
+import random
 from pathlib import Path
 
 import ale_py
@@ -18,13 +17,17 @@ import numpy as np
 gym.register_envs(ale_py)
 
 ENV_ID = "ALE/Breakout-v5"
+TAMANHO_POPULACAO = 20
 NUM_ENTRADAS = 128
+NUM_ELITE = 2
+NUM_GERACOES = 30
 NUM_OCULTOS = 16
 NUM_ACOES = 3
 NUM_PAIS = 10
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
 RESULTADOS = Path("resultados")
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
+CORES = {"A": "#2a78d6", "B": "#eb6834", "C": "#1baf7a"}
 
 
 class Agente:
@@ -42,61 +45,50 @@ class Agente:
         saida = oculto @ self.W2 + self.b2
         valor = int(np.argmax(saida))
         return valor
-
-
+    
 def criar_ambiente(render_mode=None):
-    return gym.make(ENV_ID, obs_type="ram", render_mode=render_mode)
+    return gym.make(
+        ENV_ID,
+        obs_type="ram",
+        render_mode=render_mode,
+        frameskip=4,
+    )
+    
+class AgenteAleatorio:
+    def agir(self):
+        return random.randrange(NUM_ACOES)
 
 
-def executar_episodio(ambiente, agente=None, seed=42, diagnosticar=False):
-    """Executa um episódio e, opcionalmente, contabiliza as ações."""
-    estado, _ = ambiente.reset(seed=seed)
-    aleatorio = np.random.default_rng(seed) if agente is None else None
-    recompensa_total = 0.0
-    contagem_acoes = np.zeros(NUM_ACOES, dtype=int)
-    trocas_acao = 0
-    acao_anterior = None
-    terminado = False
-    vida_total = 5
-    ambiente.step(1)
-    frame_inicio = 0
 
-    while not terminado:
-        acao = agente.agir(estado) if agente else int(aleatorio.integers(NUM_ACOES))
-        if diagnosticar:
-            contagem_acoes[acao] += 1
-            if acao_anterior is not None and acao != acao_anterior:
-                trocas_acao += 1
-            acao_anterior = acao
-        estado, recompensa, terminated, truncated, info = ambiente.step(ACOES[acao])
-        vida_atual = info.get("lives", 0)
-        freame_atual = info.get("frame_number", 0)
-        if vida_total != vida_atual:
-          vida_total = vida_atual
-          duracao_vida = freame_atual - frame_inicio
-          frame_inicio = freame_atual
-          recompensa_total += (duracao_vida/100) ** 2
-          ambiente.step(1)
-        recompensa_total += recompensa
-        terminado = terminated or truncated
+def avaliar(agente, render_mode=None):
+    env = criar_ambiente(render_mode)
+    state, info = env.reset()
+    state, reward, terminated, truncated, info = env.step(1)
 
-    if not diagnosticar:
-        return recompensa_total
+    recompensa_total = reward
+    vidas = info["lives"]
+    inicio_vida = info["episode_frame_number"]
 
-    passos = int(contagem_acoes.sum())
-    percentuais = 100 * contagem_acoes / max(1, passos)
-    return recompensa_total, {
-        "noop_pct": float(percentuais[0]),
-        "right_pct": float(percentuais[1]),
-        "left_pct": float(percentuais[2]),
-        "trocas_acao": trocas_acao,
-        "acao_dominante_pct": float(max(percentuais)),
-    }
+    while not (terminated or truncated):
+        action = agente.agir(state)
+        state, reward, terminated, truncated, info = env.step(ACOES[action])
+        recompensa_total += reward
+
+        if info["lives"] < vidas:
+            vidas = info["lives"]
+            tempo_vivo = info["episode_frame_number"] - inicio_vida
+            recompensa_total += (tempo_vivo / 100) ** 2
+            inicio_vida = info["episode_frame_number"]
+
+            if not (terminated or truncated):
+                state, reward, terminated, truncated, info = env.step(1)
+                recompensa_total += reward
+    env.close()
+    return recompensa_total
 
 
-def avaliar(agente, ambiente, seed=42, diagnosticar=False):
-    """Fitness = recompensa acumulada em um episódio."""
-    return executar_episodio(ambiente, agente, seed, diagnosticar)
+def avaliar_varias_vezes(agente, episodios):
+    return [avaliar(agente) for _ in range(episodios)]
 
 
 def criar_populacao(tamanho):
@@ -118,17 +110,21 @@ def mutar(agente, taxa, intensidade):
     return agente
 
 
-def nova_geracao(populacao, num_elite, taxa, intensidade):
+def nova_geracao(populacao):
     pais = selecionar(populacao)
-    elite = [copy.deepcopy(pai) for pai in pais[:num_elite]]
-    filhos = []
+    nova_geracao = []
+    for pai in pais[:NUM_ELITE]:
+        nova_geracao.append(copy.deepcopy(pai))
 
-    while len(elite) + len(filhos) < len(populacao):
-        pai = pais[np.random.randint(len(pais))]
+    weights = [pai.fitness for pai in pais]
+    if sum(weights) == 0:
+        weights = None
+    while len(nova_geracao) < TAMANHO_POPULACAO:
+        pai = random.choices(pais, weights=weights)[0]
         filho = copy.deepcopy(pai)
-        filhos.append(mutar(filho, taxa, intensidade))
-
-    return elite + filhos
+        mutar(filho)
+        nova_geracao.append(filho)
+    return nova_geracao
 
 
 def salvar_historico(historico, pasta):
@@ -148,126 +144,130 @@ def salvar_historico(historico, pasta):
     plt.savefig(pasta / "fitness.png", dpi=150)
     plt.close()
 
+def evoluir(nome, taxa, intensidade):
+    global TAXA_MUTACAO, INTENSIDADE_MUTACAO
+    TAXA_MUTACAO = taxa
+    INTENSIDADE_MUTACAO = intensidade
+    print(f"\n=== Experimento {nome}: taxa {taxa:.0%} | intensidade {intensidade:.2f} ===")
 
-def treinar(tamanho, geracoes, elite, taxa, intensidade, pasta, seed, acompanhar=False):
-    np.random.seed(seed)
-    populacao = criar_populacao(tamanho)
+    populacao = criar_populacao()
     historico = []
-    diagnosticos = []
     melhor_agente = None
-    melhor_fitness = float("-inf")
 
-    ambiente = criar_ambiente(render_mode="human" if acompanhar else None)
-    try:
-        for geracao in range(geracoes):
-            for indice, agente in enumerate(populacao, start=1):
-                if acompanhar:
-                    print(f"  Geração {geracao + 1}/{geracoes} | "
-                          f"Indivíduo {indice}/{tamanho}", flush=True)
-                agente.fitness, metricas = avaliar(agente, ambiente, seed, diagnosticar=True)
-                diagnosticos.append({
-                    "geracao": geracao,
-                    "individuo": indice,
-                    "fitness": agente.fitness,
-                    **metricas,
-                })
-          
-            diagnosticos_geracao = diagnosticos[-tamanho:]
-            repetitivos = sum(d["acao_dominante_pct"] >= 95 for d in diagnosticos_geracao)
-            medias_acoes = {
-                acao: float(np.mean([d[acao] for d in diagnosticos_geracao]))
-                for acao in ("noop_pct", "right_pct", "left_pct")
-            }
-            valores = [agente.fitness for agente in populacao]
-            campeao = max(populacao, key=lambda agente: agente.fitness)
-            if campeao.fitness > melhor_fitness:
-                melhor_fitness = campeao.fitness
-                melhor_agente = copy.deepcopy(campeao)
+    for geracao in range(NUM_GERACOES):
 
-            linha = {
-                "geracao": geracao,
-                "melhor": float(max(valores)),
-                "media": float(np.mean(valores)),
-                "pior": float(min(valores)),
-            }
-            historico.append(linha)
-            print(f"Geração {geracao:03d} | Melhor: {linha['melhor']:.2f} | "
-                  f"Média: {linha['media']:.2f} | Pior: {linha['pior']:.2f}")
-            print(f"  Ações médias: NOOP {medias_acoes['noop_pct']:.1f}% | "
-                  f"ESQUERDA {medias_acoes['left_pct']:.1f}% | "
-                  f"DIREITA {medias_acoes['right_pct']:.1f}% | "
-                  f"Políticas repetitivas (>=95% uma ação): {repetitivos}/{tamanho}")
+        for agente in populacao:
+            agente.fitness = avaliar(agente)
+            if melhor_agente is None or agente.fitness > melhor_agente.fitness:
+                melhor_agente = copy.deepcopy(agente)
 
-            if geracao < geracoes - 1:
-                populacao = nova_geracao(populacao, elite, taxa, intensidade)
-    finally:
-        ambiente.close()
+        valores = [agente.fitness for agente in populacao]
 
-    pasta.mkdir(parents=True, exist_ok=True)
-    salvar_historico(historico, pasta)
-    with (pasta / "diagnostico.csv").open("w", newline="", encoding="utf-8") as arquivo:
-        escritor = csv.DictWriter(arquivo, fieldnames=list(diagnosticos[0]))
+        melhor = max(valores)
+        media = float(np.mean(valores))
+        pior = min(valores)
+
+        historico.append({
+            "experimento": nome,
+            "taxa": taxa,
+            "intensidade": intensidade,
+            "geracao": geracao,
+            "melhor": melhor,
+            "media": media,
+            "pior": pior,
+        })
+
+        print(
+            f"Geração {geracao:03d} | "
+            f"Melhor: {melhor:.2f} | "
+            f"Média: {media:.2f} | "
+            f"Pior: {pior:.2f}"
+        )
+
+        populacao = nova_geracao(populacao)
+
+    return historico, melhor_agente
+
+
+def salvar_csv(caminho, linhas):
+    with open(caminho, "w", newline="") as f:
+        escritor = csv.DictWriter(f, fieldnames=linhas[0].keys())
         escritor.writeheader()
-        escritor.writerows(diagnosticos)
-    np.savez(pasta / "melhor_agente.npz", W1=melhor_agente.W1, b1=melhor_agente.b1,
-             W2=melhor_agente.W2, b2=melhor_agente.b2)
-    return melhor_agente, melhor_fitness
+        escritor.writerows(linhas)
 
 
-def comparar(agente, seed):
-    ambiente = criar_ambiente()
-    try:
-        aleatorio = executar_episodio(ambiente, seed=seed)
-        evoluido = avaliar(agente, ambiente, seed=seed)
-    finally:
-        ambiente.close()
-    print(f"Comparação | Aleatório: {aleatorio:.2f} | Evoluído: {evoluido:.2f}")
-    return aleatorio, evoluido
+def salvar_grafico(caminho, historicos):
+    plt.figure(figsize=(9, 5))
+    for nome, historico in historicos.items():
+        cor = CORES.get(nome, "#2a78d6")
+        geracoes = [h["geracao"] for h in historico]
+        plt.plot(geracoes, [h["melhor"] for h in historico], color=cor,
+                 linewidth=2, label=f"{nome} - melhor")
+        plt.plot(geracoes, [h["media"] for h in historico], color=cor,
+                 linewidth=2, linestyle="--", label=f"{nome} - média")
+    plt.xlabel("Geração")
+    plt.ylabel("Fitness")
+    plt.title("Evolução do fitness - Breakout")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(caminho)
+    plt.close()
 
 
-def visualizar(agente, seed):
-    ambiente = criar_ambiente(render_mode="human")
-    try:
-        executar_episodio(ambiente, agente, seed)
-    finally:
-        ambiente.close()
+def ler_argumentos():
+    parser = argparse.ArgumentParser(description="Neuroevolução no Breakout")
+    parser.add_argument("--experimento", choices=["A", "B", "C", "todos"], default="todos",
+                        help="qual experimento rodar (padrão: todos)")
+    parser.add_argument("--geracoes", type=int, default=NUM_GERACOES)
+    parser.add_argument("--populacao", type=int, default=TAMANHO_POPULACAO)
+    parser.add_argument("--render", action="store_true",
+                        help="mostrar o melhor agente jogando ao final")
+    return parser.parse_args()
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Neuroevolução no Freeway")
-    parser.add_argument("--populacao", type=int, default=20)
-    parser.add_argument("--geracoes", type=int, default=30)
-    parser.add_argument("--elite", type=int, default=2)
-    parser.add_argument("--experimento", choices=["A", "B", "C", "todos"], default="B")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--visualizar", action="store_true",
-                        help="Exibe o melhor agente ao terminar o treinamento.")
-    parser.add_argument("--acompanhar", action="store_true",
-                        help="Exibe todas as partidas enquanto os agentes são avaliados.")
-    # Colab/Jupyter inclui argumentos internos do kernel (ex.: -f arquivo.json).
-    # No terminal, argumentos inválidos continuam produzindo erro.
-    if argv is None and "ipykernel" in sys.modules:
-        args, _ = parser.parse_known_args()
-    else:
-        args = parser.parse_args(argv)
+def main():
+    global NUM_GERACOES, TAMANHO_POPULACAO
+    args = ler_argumentos()
+    NUM_GERACOES = args.geracoes
+    TAMANHO_POPULACAO = args.populacao
+    nomes = list(EXPERIMENTOS) if args.experimento == "todos" else [args.experimento]
+    os.makedirs("resultados", exist_ok=True)
 
-    if args.populacao < 2 or args.geracoes < 1 or not (1 <= args.elite <= args.populacao // 2):
-        parser.error("Use população >= 2, gerações >= 1 e elite entre 1 e metade da população.")
+    aleatorio = avaliar_varias_vezes(AgenteAleatorio(), args.episodios_teste)
+    print(f"Agente aleatório: média {np.mean(aleatorio):.2f} | máximo {max(aleatorio):.2f}")
+    comparacao = [{
+        "agente": "aleatorio",
+        "media": float(np.mean(aleatorio)),
+        "maximo": max(aleatorio),
+        "minimo": min(aleatorio),
+    }]
 
-    nomes = EXPERIMENTOS if args.experimento == "todos" else [args.experimento]
+    historicos = {}
+    melhores = {}
     for nome in nomes:
         taxa, intensidade = EXPERIMENTOS[nome]
-        pasta = RESULTADOS / nome
-        print(f"\nExperimento {nome} | Mutação: {taxa:.0%} | Intensidade: {intensidade}")
-        agente, _ = treinar(args.populacao, args.geracoes, args.elite,
-                           taxa, intensidade, pasta, args.seed, args.acompanhar)
-        aleatorio, evoluido = comparar(agente, args.seed)
-        with (pasta / "comparacao.csv").open("w", newline="", encoding="utf-8") as arquivo:
-            escritor = csv.writer(arquivo)
-            escritor.writerow(["agente", "recompensa"])
-            escritor.writerows([["aleatorio", aleatorio], ["evoluido", evoluido]])
-        if args.visualizar:
-            visualizar(agente, args.seed)
+        historicos[nome], melhores[nome] = evoluir(nome, taxa, intensidade)
+
+        teste = avaliar_varias_vezes(melhores[nome], args.episodios_teste)
+        print(f"Melhor agente do experimento {nome}: média {np.mean(teste):.2f} "
+              f"em {args.episodios_teste} episódios")
+        comparacao.append({
+            "agente": f"melhor_{nome}",
+            "media": float(np.mean(teste)),
+            "maximo": max(teste),
+            "minimo": min(teste),
+        })
+
+    sufixo = "" if args.experimento == "todos" else f"_{args.experimento}"
+    salvar_csv(f"resultados/fitness{sufixo}.csv", [h for n in nomes for h in historicos[n]])
+    salvar_csv(f"resultados/comparacao{sufixo}.csv", comparacao)
+    salvar_grafico(f"resultados/fitness{sufixo}.png", historicos)
+
+    if args.render:
+        nome = max(melhores, key=lambda n: melhores[n].fitness)
+        print(f"Renderizando o melhor agente (experimento {nome})")
+        print("Fitness ao jogar de novo:", avaliar(melhores[nome], render_mode="human"))
 
 
 if __name__ == "__main__":

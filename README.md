@@ -1,109 +1,61 @@
-# Gabarito — Neuroevolução no Freeway
+# Evolução de um agente inteligente no Atari — Breakout
 
-**UniSenac Pelotas | Fundamentos de Inteligência Artificial | Prof. Pablo De Chiaro Rosa**
+Objetivo: Construir um agente evolutivo através do reinforcement learning.
 
-Implementação de referência do trabalho prático. O objetivo é evoluir os **pesos de uma rede neural**, sem backpropagation, usando seleção, elitismo e mutação.
-
-## Instalação
-
-Requer Python 3.10+ e a ROM do Freeway fornecida pela instalação do `ale-py`.
+## Como executar
 
 ```bash
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-# source .venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Execução
+## Configuração do Breakout
 
-```bash
-python main.py                       # experimento B (20 indivíduos, 30 gerações)
-python main.py --experimento todos   # executa A, B e C
-python main.py --populacao 4 --geracoes 2  # teste rápido
-python main.py --visualizar          # abre uma partida do melhor agente ao final
-python main.py --acompanhar          # mostra cada indivíduo durante o treinamento
-python main.py --experimento todos --acompanhar  # acompanha A, B e C em tempo real
-python main.py --populacao 4 --geracoes 2 --acompanhar  # teste rápido com janela
-```
-
-### Google Colab / Jupyter
-
-Instale as dependências na primeira célula:
-
-```python
-%pip install "gymnasium[atari]" ale-py numpy matplotlib
-```
-
-Em seguida, execute o arquivo na célula:
-
-```python
-%run main.py --populacao 4 --geracoes 2
-```
-
-Alternativamente, após importar `main`, é possível passar os parâmetros diretamente:
-
-```python
-from main import main
-main(["--populacao", "4", "--geracoes", "2"])
-```
-
-O código ignora argumentos internos do kernel ao ser executado no Jupyter, mas mantém validação estrita no terminal. **Não use `--visualizar` nem `--acompanhar` no Colab**: `render_mode="human"` requer interface gráfica local.
-
-A visualização requer ambiente gráfico. Com `--acompanhar`, o Freeway mostra **cada partida de cada indivíduo durante o treinamento**, e o console identifica geração e indivíduo. Isso é diferente de `--visualizar`, que mostra apenas o campeão no final. É possível combinar as opções. Uma execução completa pode demorar bastante: cada indivíduo joga uma partida inteira por geração, e a renderização ocorre em tempo real.
-
-## Como funciona
-
-- **Ambiente:** `ALE/Freeway-v5`, observação `ram` (128 entradas), 3 ações discretas.
-- **Agente:** rede neural `128 → 16 (tanh) → 3 (argmax)`. Pesos e vieses formam o DNA.
-- **Recompensa:** valor retornado pelo ambiente em cada passo. **Fitness:** soma das recompensas recebidas no episódio.
-- **População:** 20 agentes com pesos inicialmente aleatórios.
-- **Seleção:** melhores 50% pelo fitness; cada filho escolhe aleatoriamente um pai dentre eles.
-- **Elitismo:** os 2 melhores são copiados sem mutação.
-- **Reprodução:** cópia independente do pai, **sem crossover**.
-- **Mutação:** cada peso ou viés tem uma probabilidade de alteração; a mudança é um ruído gaussiano com desvio-padrão igual à intensidade configurada.
-- **Exploração:** ocorre na inicialização aleatória e nas mutações.
-- **Convergência:** pode ser investigada pelas curvas de melhor fitness e fitness médio. Estabilização não garante solução ótima.
-
-## Experimentos exigidos
-
-| Experimento | Taxa de mutação | Intensidade |
-|---|---:|---:|
-| A | 1% | 0,05 |
-| B | 10% | 0,20 |
-| C | 40% | 0,50 |
-
-Use `--experimento todos` para executar os três. A semente (`--seed`, padrão 42) é a mesma para as três configurações, permitindo comparação mais controlada. A avaliação utiliza um episódio por indivíduo; para conclusões estatísticas, recomenda-se repetir com várias sementes.
-
-## Arquivos gerados
-
-Cada experimento gera uma pasta `resultados/A`, `resultados/B` ou `resultados/C` com:
-
-- `fitness.csv`: melhor, média e pior fitness por geração;
-- `diagnostico.csv`: por geração e indivíduo, fitness, passos, percentual de NOOP/UP/DOWN, trocas de ação e dominância da ação mais usada;
-- `fitness.png`: gráfico do melhor fitness e fitness médio;
-- `melhor_agente.npz`: pesos do melhor indivíduo encontrado;
-- `comparacao.csv`: recompensa do agente aleatório e do evoluído.
-
-### Diagnóstico de comportamento
-
-O console exibe, após cada geração, a distribuição média de ações dos agentes e quantos usam uma única ação em pelo menos **95%** dos passos. Esses agentes são classificados como **políticas repetitivas** para fins de diagnóstico, não necessariamente como políticas ruins.
-
-O `diagnostico.csv` permite investigar cada indivíduo: `noop_pct`, `up_pct` e `down_pct` mostram a frequência das ações, `trocas_acao` indica mudanças de decisão e `acao_dominante_pct` mede a predominância de uma ação. Esses valores **não alteram o fitness, a seleção ou a mutação**; servem apenas para observação. A média no console é calculada entre indivíduos, não ponderada pelo número de passos.
-
-**Interpretação:** a comparação aleatória é uma baseline simples, não prova que o evoluído seja melhor em geral. Uma população pode estagnar; comparar as três curvas e executar múltiplas sementes oferece evidência mais forte.
-
-## Correspondência com a atividade
-
-| Conceito / etapa | Implementação |
+| Item | Valor |
 |---|---|
-| Parte 1: rede e ambiente | `Agente`, `criar_ambiente` |
-| Parte 2: interação e fitness | `executar_episodio`, `avaliar` |
-| Parte 2: população e seleção | `criar_populacao`, `selecionar` |
-| Parte 2: elitismo e mutação | `mutar`, `nova_geracao` |
-| Parte 3: gerações, métricas e gráfico | `treinar`, `salvar_historico` |
-| Comparação e visualização | `comparar`, `visualizar` |
+| Ambiente | `ALE/Breakout-v5` (frameskip = 4) |
+| Observação | RAM do Atari
+| Rede | 128 entradas → 16 ocultos (tanh) → 3 saídas (argmax) |
+| Ações | 0 = NOOP, 2 = RIGHT, 3 = LEFT (ação 1 "SHOOT" não mapeada)|
+| Tamanho da população | 20 |
+| Número de gerações | 30 |
+| Pais selecionados | X |
+| Elite | X |
+| Taxa / intensidade de mutação | A: 1% / 0,05 — B: 10% / 0,20 — C: 40% / 0,50 |
 
-> Gabarito didático: os resultados numéricos dependem da execução e não são presumidos neste documento.
+## Perguntas da defesa
+
+### 1. O que é o agente e qual estado ele recebe do ambiente?
+É uma rede neural cujos pesos são W1, b1, W2, b2. <br>
+O estado que ele recebe é a RAM do Atari (obs_type), um vetor de 128 bytes.
+
+### 2. Qual a diferença entre ação, recompensa e fitness?
+- Ação: é o movimento que o agente faz no jogo, através do método env.step()
+- Recompensa: é o valor que o ambiente devolve de cada ação. No Breakout, é cada tijolo quebrado.
+- Fitness: é o desempenho total de um indivíduo, basicamente a soma da recompensa naquela partida.
+
+### 3. Como indivíduo, população e geração aparecem no código?
+- Indivíduo: é uma classe Agente() instanciada pelo criar_populacao()
+- População: A população faz parte de cada geração. No código a primeira população é chamada pelo evoluir(), que da início aos experimentos. Depois disso, cada nova geração recebe por parametro a população atual a fim de construir a próxima geração.
+- Geração: A geração aparece no loop dentro de evoluir(). Após a primeira população toda jogar, a nova geração é chamada. É na nova_geracao() que os melhores individuos são selecionados e seus filhos, possivelmente mutados, com intuito de passar o melhor DNA para a geração seguinte e procurar encontrar melhores modificações. (Pra mim é onde fica a "regra de negócio" da evolução)
+
+### 4. Como a seleção foi implementada e por que esse critério foi escolhido?
+
+
+### 5. O que aconteceria se não existisse elitismo?
+Sem o elitismo, os melhores genes poderiam se perder, e o desempenho das gerações seguintes poderia piorar.
+
+
+### 6. Como taxa e intensidade de mutação afetam os descendentes?
+- Taxa: A cada novo descendente, a chance de ele sofrer uma mutação é designada pela taxa.
+- Intensidade: A intensidade depende do individuo sofrer mutação, neste caso, ela define o quanto os pesos da rede neural variam.
+
+### 7. Onde ocorre exploração no algoritmo?
+Nos parametros aleatórios do Agente(), em mutar(), selecionar() e nova_geracao().
+
+### 8. Os resultados indicam convergência? Qual evidência sustenta a resposta?
+
+### 9. O melhor agente superou o agente aleatório? Qual evidência mostra isso?
+
+### 10. Qual mudança vocês fariam para tentar melhorar o resultado?

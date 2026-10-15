@@ -3,7 +3,6 @@ import copy
 import csv
 import os
 import random
-from pathlib import Path
 
 import ale_py
 import gymnasium as gym
@@ -23,11 +22,9 @@ NUM_ELITE = 2
 NUM_GERACOES = 30
 NUM_OCULTOS = 16
 NUM_ACOES = 3
-NUM_PAIS = 10
 PAIS_PONTOS = 3
 PAIS_TEMPO = 2
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
-RESULTADOS = Path("resultados")
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
 CORES = {"A": "#2a78d6", "B": "#eb6834", "C": "#1baf7a"}
 
@@ -59,7 +56,7 @@ def criar_ambiente(render_mode=None):
     )
     
 class AgenteAleatorio:
-    def agir(self):
+    def agir(self, estado):
         return random.randrange(NUM_ACOES)
 
 
@@ -88,6 +85,9 @@ def avaliar(agente, render_mode=None):
             if not (terminated or truncated):
                 state, reward, terminated, truncated, info = env.step(1)
                 recompensa_total += reward
+
+    # conta a vida atual caso o episódio termine por truncamento
+    maior_vida = max(maior_vida, info["episode_frame_number"] - inicio_vida)
     env.close()
     return recompensa_total, maior_vida
 
@@ -120,7 +120,7 @@ def mutar(agente, taxa, intensidade):
     return agente
 
 
-def nova_geracao(populacao):
+def nova_geracao(populacao, taxa, intensidade):
     pais = selecionar(populacao)
     nova_geracao = []
     for pai in pais[:NUM_ELITE]:
@@ -130,35 +130,15 @@ def nova_geracao(populacao):
     while len(nova_geracao) < TAMANHO_POPULACAO:
         pai = random.choices(pais, weights=weights)[0]
         filho = copy.deepcopy(pai)
-        mutar(filho)
+        mutar(filho, taxa, intensidade)
         nova_geracao.append(filho)
     return nova_geracao
 
 
-def salvar_historico(historico, pasta):
-    with (pasta / "fitness.csv").open("w", newline="", encoding="utf-8") as arquivo:
-        escritor = csv.DictWriter(arquivo, fieldnames=["geracao", "melhor", "media", "pior"])
-        escritor.writeheader()
-        escritor.writerows(historico)
-
-    geracoes = [linha["geracao"] for linha in historico]
-    plt.figure(figsize=(8, 4))
-    plt.plot(geracoes, [linha["melhor"] for linha in historico], label="Melhor")
-    plt.plot(geracoes, [linha["media"] for linha in historico], label="Média")
-    plt.xlabel("Geração")
-    plt.ylabel("Fitness (recompensa acumulada)")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(pasta / "fitness.png", dpi=150)
-    plt.close()
-
 def evoluir(nome, taxa, intensidade):
-    global TAXA_MUTACAO, INTENSIDADE_MUTACAO
-    TAXA_MUTACAO = taxa
-    INTENSIDADE_MUTACAO = intensidade
     print(f"\n=== Experimento {nome}: taxa {taxa:.0%} | intensidade {intensidade:.2f} ===")
 
-    populacao = criar_populacao()
+    populacao = criar_populacao(TAMANHO_POPULACAO)
     historico = []
     melhor_agente = None
 
@@ -186,6 +166,11 @@ def evoluir(nome, taxa, intensidade):
             "pior": pior,
             "maior_vida": max(agente.tempo_vivo for agente in populacao),
         })
+        print(f"Geração {geracao}: melhor {melhor:.1f} | média {media:.2f} | pior {pior:.1f}")
+
+        populacao = nova_geracao(populacao, taxa, intensidade)
+
+    return historico, melhor_agente
 
 
 def salvar_csv(caminho, linhas):
@@ -221,6 +206,8 @@ def ler_argumentos():
                         help="qual experimento rodar (padrão: todos)")
     parser.add_argument("--geracoes", type=int, default=NUM_GERACOES)
     parser.add_argument("--populacao", type=int, default=TAMANHO_POPULACAO)
+    parser.add_argument("--episodios-teste", type=int, default=10,
+                        help="episódios para avaliar o aleatório e os melhores agentes")
     parser.add_argument("--render", action="store_true",
                         help="mostrar o melhor agente jogando ao final")
     return parser.parse_args()
@@ -262,7 +249,8 @@ def main():
     sufixo = "" if args.experimento == "todos" else f"_{args.experimento}"
     salvar_csv(f"resultados/fitness{sufixo}.csv", [h for n in nomes for h in historicos[n]])
     salvar_csv(f"resultados/comparacao{sufixo}.csv", comparacao)
-    salvar_grafico(f"resultados/fitness{sufixo}.png", historicos)
+    salvar_grafico(f"resultados/fitness{sufixo}.png", historicos,
+                   float(np.mean(aleatorio)))
 
     if args.render:
         nome = max(melhores, key=lambda n: melhores[n].fitness)

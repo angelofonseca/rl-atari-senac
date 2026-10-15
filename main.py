@@ -27,6 +27,7 @@ PAIS_TEMPO = 2
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
 CORES = {"A": "#2a78d6", "B": "#eb6834", "C": "#1baf7a"}
+MARCADORES = {"A": "o", "B": "s", "C": "^"}
 
 
 class Agente:
@@ -186,7 +187,9 @@ def salvar_grafico(caminho, historicos, media_aleatorio):
         cor = CORES.get(nome, "#2a78d6")
         geracoes = [h["geracao"] for h in historico]
         plt.plot(geracoes, [h["melhor"] for h in historico], color=cor,
-                 linewidth=2, label=f"{nome} - melhor")
+                 linewidth=2, marker=MARCADORES.get(nome, "o"), markersize=5,
+                 markerfacecolor="none", markeredgewidth=1.2,
+                 label=f"{nome} - melhor")
         plt.plot(geracoes, [h["media"] for h in historico], color=cor,
                  linewidth=2, linestyle="--", label=f"{nome} - média")
     plt.xlabel("Geração")

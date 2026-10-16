@@ -22,7 +22,7 @@ NUM_ELITE = 2
 NUM_GERACOES = 30
 NUM_OCULTOS = 16
 NUM_ACOES = 3
-PAIS_PONTOS = 3
+PAIS_PONTOS = 5
 PAIS_TEMPO = 2
 ACOES = [0, 2, 3] ## NOOP, RIGHT, LEFT
 EXPERIMENTOS = {"A": (0.01, 0.05), "B": (0.10, 0.20), "C": (0.40, 0.50)}
@@ -102,8 +102,8 @@ def criar_populacao(tamanho):
 
 def selecionar(populacao):
     pais = sorted(populacao, key=lambda x: x.fitness, reverse=True)[:PAIS_PONTOS]
-    por_tempo = sorted(populacao, key=lambda x: x.tempo_vivo, reverse=True)
-    for agente in por_tempo:
+    pais_por_tempo = sorted(populacao, key=lambda x: x.tempo_vivo, reverse=True)
+    for agente in pais_por_tempo:
         if len(pais) == PAIS_PONTOS + PAIS_TEMPO:
             break
         if agente not in pais:

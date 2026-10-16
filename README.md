@@ -20,8 +20,8 @@ pip install -r requirements.txt
 | Ações | 0 = NOOP, 2 = RIGHT, 3 = LEFT (ação 1 "SHOOT" não mapeada)|
 | Tamanho da população | 20 |
 | Número de gerações | 30 |
-| Pais selecionados | X |
-| Elite | X |
+| Pais selecionados | 5 + 2 |
+| Elite | 2 |
 | Taxa / intensidade de mutação | A: 1% / 0,05 — B: 10% / 0,20 — C: 40% / 0,50 |
 
 ## Perguntas da defesa
